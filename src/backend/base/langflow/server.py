@@ -6,8 +6,6 @@ from gunicorn import glogging
 from gunicorn.app.base import BaseApplication
 from uvicorn.workers import UvicornWorker
 
-from langflow.logging.logger import InterceptHandler
-
 
 class LangflowUvicornWorker(UvicornWorker):
     CONFIG_KWARGS = {"loop": "asyncio"}
@@ -38,8 +36,9 @@ class Logger(glogging.Logger):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-        logging.getLogger("gunicorn.error").handlers = [InterceptHandler()]
-        logging.getLogger("gunicorn.access").handlers = [InterceptHandler()]
+        logging.getLogger("uvicorn").disabled = True
+        logging.getLogger("uvicorn.error").disabled = True
+        logging.getLogger("uvicorn.access").disabled = True
 
 
 class LangflowApplication(BaseApplication):

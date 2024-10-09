@@ -212,8 +212,9 @@ def setup_uvicorn_logger():
 
 
 def setup_gunicorn_logger():
-    logging.getLogger("gunicorn.error").handlers = [InterceptHandler()]
-    logging.getLogger("gunicorn.access").handlers = [InterceptHandler()]
+    logging.getLogger("gunicorn").disabled = True
+    logging.getLogger("gunicorn.error").disabled = True
+    logging.getLogger("gunicorn.access").disabled = True
 
 
 class InterceptHandler(logging.Handler):
