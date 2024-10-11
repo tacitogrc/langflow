@@ -1,0 +1,97 @@
+diff --git a/src/backend/base/langflow/main.py b/src/backend/base/langflow/main.py
+index bf8bd4dde..30e020676 100644
+--- a/src/backend/base/langflow/main.py
++++ b/src/backend/base/langflow/main.py
+@@ -1,8 +1,10 @@
++
+ import asyncio
+ import json
+ import os
+ import re
+ import warnings
++from multiprocessing import Process, Queue
+ from contextlib import asynccontextmanager
+ from http import HTTPStatus
+ from pathlib import Path
+@@ -87,11 +89,54 @@ class JavaScriptMIMETypeMiddleware(BaseHTTPMiddleware):
+         return response
+
+
++#-------------------------------------------------------
++
++def run_heavy_task_process(queue):
++    """Execute a tarefa pesada em um processo separado."""
++    try:
++        # Recria os serviços no novo processo
++        settings_service = get_settings_service()
++        cache_service = get_cache_service()
++
++        # Executa a tarefa pesada
++        result = get_and_cache_all_types_dict(settings_service, cache_service)
++        queue.put(result)
++    except Exception as e:
++        queue.put(e)
++
++async def initialize_background_tasks():
++    """Initialize background tasks without blocking the main startup"""
++    # Criar uma queue para comunicação entre processos
++    queue = Queue()
++
++    # Iniciar processo separado
++    process = Process(target=run_heavy_task_process, args=(queue,))
++    process.start()
++
++    # Criar uma task para monitorar o resultado e atualizar os projetos starter
++    async def monitor_task():
++        # Aguardar o resultado em uma thread separada para não bloquear
++        loop = asyncio.get_running_loop()
++        result = await loop.run_in_executor(None, queue.get)
++
++        # Verificar se houve erro
++        if isinstance(result, Exception):
++            logger.error(f"Error in background task: {result}")
++            return
++
++        # Atualizar projetos starter com o resultado
++        await create_or_update_starter_projects(result)
++
++        # Limpar
++        process.join()
++
++    # Iniciar o monitoramento em background
++    asyncio.create_task(monitor_task())
++
+ def get_lifespan(fix_migration=False, socketio_server=None, version=None):
+     @asynccontextmanager
+     async def lifespan(app: FastAPI):
+         nest_asyncio.apply()
+-        # Startup message
+         if version:
+             rprint(f"[bold green]Starting Langflow v{version}...[/bold green]")
+         else:
+@@ -100,8 +145,10 @@ def get_lifespan(fix_migration=False, socketio_server=None, version=None):
+             initialize_services(fix_migration=fix_migration, socketio_server=socketio_server)
+             setup_llm_caching()
+             initialize_super_user_if_needed()
+-            task = asyncio.create_task(get_and_cache_all_types_dict(get_settings_service(), get_cache_service()))
+-            await create_or_update_starter_projects(task)
++
++            # Iniciar tarefas pesadas em background
++            await initialize_background_tasks()
++
+             asyncio.create_task(get_telemetry_service().start())
+             load_flows_from_directory()
+             yield
+@@ -109,11 +156,11 @@ def get_lifespan(fix_migration=False, socketio_server=None, version=None):
+             if "langflow migration --fix" not in str(exc):
+                 logger.exception(exc)
+             raise
+-        # Shutdown message
+         rprint("[bold red]Shutting down Langflow...[/bold red]")
+         await teardown_services()
+
+     return lifespan
++#-------------------------------------------------------
+
+
+ def create_app():

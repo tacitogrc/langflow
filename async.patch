@@ -1,0 +1,306 @@
+diff --git a/src/backend/base/langflow/api/v1/api_key.py b/src/backend/base/langflow/api/v1/api_key.py
+index 297250ef3..21cb032e4 100644
+--- a/src/backend/base/langflow/api/v1/api_key.py
++++ b/src/backend/base/langflow/api/v1/api_key.py
+@@ -20,7 +20,7 @@ router = APIRouter(tags=["APIKey"], prefix="/api_key")
+
+
+ @router.get("/", response_model=ApiKeysResponse)
+-def get_api_keys_route(
++async def get_api_keys_route(
+     db: Annotated[Session, Depends(get_session)],
+     current_user: Annotated[User, Depends(auth_utils.get_current_active_user)],
+ ):
+@@ -34,7 +34,7 @@ def get_api_keys_route(
+
+
+ @router.post("/", response_model=UnmaskedApiKeyRead)
+-def create_api_key_route(
++async def create_api_key_route(
+     req: ApiKeyCreate,
+     current_user: Annotated[User, Depends(auth_utils.get_current_active_user)],
+     db: Annotated[Session, Depends(get_session)],
+@@ -47,7 +47,7 @@ def create_api_key_route(
+
+
+ @router.delete("/{api_key_id}")
+-def delete_api_key_route(
++async def delete_api_key_route(
+     api_key_id: UUID,
+     current_user=Depends(auth_utils.get_current_active_user),
+     db: Session = Depends(get_session),
+@@ -60,7 +60,7 @@ def delete_api_key_route(
+
+
+ @router.post("/store")
+-def save_store_api_key(
++async def save_store_api_key(
+     api_key_request: ApiKeyCreateRequest,
+     response: Response,
+     current_user: Annotated[User, Depends(auth_utils.get_current_active_user)],
+@@ -94,7 +94,7 @@ def save_store_api_key(
+
+
+ @router.delete("/store")
+-def delete_store_api_key(
++async def delete_store_api_key(
+     current_user: Annotated[User, Depends(auth_utils.get_current_active_user)],
+     db: Annotated[Session, Depends(get_session)],
+ ):
+diff --git a/src/backend/base/langflow/api/v1/endpoints.py b/src/backend/base/langflow/api/v1/endpoints.py
+index 4d5fefef8..b15ba611a 100644
+--- a/src/backend/base/langflow/api/v1/endpoints.py
++++ b/src/backend/base/langflow/api/v1/endpoints.py
+@@ -577,7 +577,7 @@ async def create_upload_file(
+
+ # get endpoint to return version of langflow
+ @router.get("/version")
+-def get_version():
++async def get_version():
+     return get_version_info()
+
+
+@@ -655,7 +655,7 @@ async def custom_component_update(
+
+
+ @router.get("/config", response_model=ConfigResponse)
+-def get_config():
++async def get_config():
+     try:
+         from langflow.services.deps import get_settings_service
+
+diff --git a/src/backend/base/langflow/api/v1/flows.py b/src/backend/base/langflow/api/v1/flows.py
+index 109aa53fd..d55daa9d1 100644
+--- a/src/backend/base/langflow/api/v1/flows.py
++++ b/src/backend/base/langflow/api/v1/flows.py
+@@ -34,7 +34,7 @@ router = APIRouter(prefix="/flows", tags=["Flows"])
+
+
+ @router.post("/", response_model=FlowRead, status_code=201)
+-def create_flow(
++async def create_flow(
+     *,
+     session: Session = Depends(get_session),
+     flow: FlowCreate,
+@@ -122,7 +122,7 @@ def create_flow(
+
+
+ @router.get("/", response_model=list[FlowRead], status_code=200)
+-def read_flows(
++async def read_flows(
+     *,
+     current_user: User = Depends(get_current_active_user),
+     session: Session = Depends(get_session),
+@@ -182,7 +182,7 @@ def read_flows(
+
+
+ @router.get("/{flow_id}", response_model=FlowRead, status_code=200)
+-def read_flow(
++async def read_flow(
+     *,
+     session: Session = Depends(get_session),
+     flow_id: UUID,
+@@ -204,7 +204,7 @@ def read_flow(
+
+
+ @router.patch("/{flow_id}", response_model=FlowRead, status_code=200)
+-def update_flow(
++async def update_flow(
+     *,
+     session: Session = Depends(get_session),
+     flow_id: UUID,
+@@ -282,7 +282,7 @@ async def delete_flow(
+
+
+ @router.post("/batch/", response_model=list[FlowRead], status_code=201)
+-def create_flows(
++async def create_flows(
+     *,
+     session: Session = Depends(get_session),
+     flow_list: FlowListCreate,
+diff --git a/src/backend/base/langflow/api/v1/folders.py b/src/backend/base/langflow/api/v1/folders.py
+index 4fb9ae2d4..d9b017692 100644
+--- a/src/backend/base/langflow/api/v1/folders.py
++++ b/src/backend/base/langflow/api/v1/folders.py
+@@ -25,7 +25,7 @@ router = APIRouter(prefix="/folders", tags=["Folders"])
+
+
+ @router.post("/", response_model=FolderRead, status_code=201)
+-def create_folder(
++async def create_folder(
+     *,
+     session: Session = Depends(get_session),
+     folder: FolderCreate,
+@@ -78,7 +78,7 @@ def create_folder(
+
+
+ @router.get("/", response_model=list[FolderRead], status_code=200)
+-def read_folders(
++async def read_folders(
+     *,
+     session: Session = Depends(get_session),
+     current_user: User = Depends(get_current_active_user),
+@@ -95,7 +95,7 @@ def read_folders(
+
+
+ @router.get("/{folder_id}", response_model=FolderReadWithFlows, status_code=200)
+-def read_folder(
++async def read_folder(
+     *,
+     session: Session = Depends(get_session),
+     folder_id: str,
+@@ -115,7 +115,7 @@ def read_folder(
+
+
+ @router.patch("/{folder_id}", response_model=FolderRead, status_code=200)
+-def update_folder(
++async def update_folder(
+     *,
+     session: Session = Depends(get_session),
+     folder_id: str,
+diff --git a/src/backend/base/langflow/api/v1/starter_projects.py b/src/backend/base/langflow/api/v1/starter_projects.py
+index 74a639565..a180e9257 100644
+--- a/src/backend/base/langflow/api/v1/starter_projects.py
++++ b/src/backend/base/langflow/api/v1/starter_projects.py
+@@ -9,7 +9,7 @@ router = APIRouter(prefix="/starter-projects", tags=["Flows"])
+
+
+ @router.get("/", response_model=list[GraphDump], status_code=200)
+-def get_starter_projects(
++async def get_starter_projects(
+     *,
+     current_user: User = Depends(get_current_active_user),
+ ):
+diff --git a/src/backend/base/langflow/api/v1/store.py b/src/backend/base/langflow/api/v1/store.py
+index 7ae900302..b42d7ab69 100644
+--- a/src/backend/base/langflow/api/v1/store.py
++++ b/src/backend/base/langflow/api/v1/store.py
+@@ -48,7 +48,7 @@ def get_optional_user_store_api_key(
+
+
+ @router.get("/check/")
+-def check_if_store_is_enabled(
++async def check_if_store_is_enabled(
+     settings_service=Depends(get_settings_service),
+ ):
+     return {
+diff --git a/src/backend/base/langflow/api/v1/users.py b/src/backend/base/langflow/api/v1/users.py
+index 2151dfcaf..10b2ed4ee 100644
+--- a/src/backend/base/langflow/api/v1/users.py
++++ b/src/backend/base/langflow/api/v1/users.py
+@@ -23,7 +23,7 @@ router = APIRouter(tags=["Users"], prefix="/users")
+
+
+ @router.post("/", response_model=UserRead, status_code=201)
+-def add_user(
++async def add_user(
+     user: UserCreate,
+     session: Annotated[Session, Depends(get_session)],
+     settings_service=Depends(get_settings_service),
+@@ -49,7 +49,7 @@ def add_user(
+
+
+ @router.get("/whoami", response_model=UserRead)
+-def read_current_user(
++async def read_current_user(
+     current_user: Annotated[User, Depends(get_current_active_user)],
+ ) -> User:
+     """
+@@ -59,7 +59,7 @@ def read_current_user(
+
+
+ @router.get("/")
+-def read_all_users(
++async def read_all_users(
+     skip: int = 0,
+     limit: int = 10,
+     _: Session = Depends(get_current_active_superuser),
+@@ -81,7 +81,7 @@ def read_all_users(
+
+
+ @router.patch("/{user_id}", response_model=UserRead)
+-def patch_user(
++async def patch_user(
+     user_id: UUID,
+     user_update: UserUpdate,
+     user: Annotated[User, Depends(get_current_active_user)],
+@@ -111,7 +111,7 @@ def patch_user(
+
+
+ @router.patch("/{user_id}/reset-password", response_model=UserRead)
+-def reset_password(
++async def reset_password(
+     user_id: UUID,
+     user_update: UserUpdate,
+     user: Annotated[User, Depends(get_current_active_user)],
+@@ -136,7 +136,7 @@ def reset_password(
+
+
+ @router.delete("/{user_id}")
+-def delete_user(
++async def delete_user(
+     user_id: UUID,
+     current_user: Annotated[User, Depends(get_current_active_superuser)],
+     session: Annotated[Session, Depends(get_session)],
+diff --git a/src/backend/base/langflow/api/v1/validate.py b/src/backend/base/langflow/api/v1/validate.py
+index bd36d95f5..4a7434caf 100644
+--- a/src/backend/base/langflow/api/v1/validate.py
++++ b/src/backend/base/langflow/api/v1/validate.py
+@@ -10,7 +10,7 @@ router = APIRouter(prefix="/validate", tags=["Validate"])
+
+
+ @router.post("/code", status_code=200, response_model=CodeValidationResponse)
+-def post_validate_code(code: Code):
++async def post_validate_code(code: Code):
+     try:
+         errors = validate_code(code.code)
+         return CodeValidationResponse(
+@@ -22,7 +22,7 @@ def post_validate_code(code: Code):
+
+
+ @router.post("/prompt", status_code=200, response_model=PromptValidationResponse)
+-def post_validate_prompt(prompt_request: ValidatePromptRequest):
++async def post_validate_prompt(prompt_request: ValidatePromptRequest):
+     try:
+         if not prompt_request.frontend_node:
+             return PromptValidationResponse(
+diff --git a/src/backend/base/langflow/api/v1/variable.py b/src/backend/base/langflow/api/v1/variable.py
+index 6d4dae238..2695f6c4b 100644
+--- a/src/backend/base/langflow/api/v1/variable.py
++++ b/src/backend/base/langflow/api/v1/variable.py
+@@ -16,7 +16,7 @@ router = APIRouter(prefix="/variables", tags=["Variables"])
+
+
+ @router.post("/", response_model=VariableRead, status_code=201)
+-def create_variable(
++async def create_variable(
+     *,
+     session: Session = Depends(get_session),
+     variable: VariableCreate,
+@@ -53,7 +53,7 @@ def create_variable(
+
+
+ @router.get("/", response_model=list[VariableRead], status_code=200)
+-def read_variables(
++async def read_variables(
+     *,
+     session: Session = Depends(get_session),
+     current_user: User = Depends(get_current_active_user),
+@@ -67,7 +67,7 @@ def read_variables(
+
+
+ @router.patch("/{variable_id}", response_model=VariableRead, status_code=200)
+-def update_variable(
++async def update_variable(
+     *,
+     session: Session = Depends(get_session),
+     variable_id: UUID,
+@@ -91,7 +91,7 @@ def update_variable(
+
+
+ @router.delete("/{variable_id}", status_code=204)
+-def delete_variable(
++async def delete_variable(
+     *,
+     session: Session = Depends(get_session),
+     variable_id: UUID,

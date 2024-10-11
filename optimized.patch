@@ -1,0 +1,360 @@
+diff --git a/src/backend/base/langflow/custom/directory_reader/directory_reader.py b/src/backend/base/langflow/custom/directory_reader/directory_reader.py
+index 1d5795f4e..785953d55 100644
+--- a/src/backend/base/langflow/custom/directory_reader/directory_reader.py
++++ b/src/backend/base/langflow/custom/directory_reader/directory_reader.py
+@@ -316,53 +316,66 @@ class DirectoryReader:
+     async def get_output_types_from_code_async(self, code: str):
+         return await asyncio.to_thread(self.get_output_types_from_code, code)
+
++
+     async def abuild_component_menu_list(self, file_paths):
+-        response = {"menu": []}
+         logger.debug("-------------------- Async Building component menu list --------------------")
+
+-        tasks = [self.process_file_async(file_path) for file_path in file_paths]
+-        results = await asyncio.gather(*tasks)
+-
+-        for file_path, (validation_result, result_content) in zip(file_paths, results, strict=True):
+-            _file_path = Path(file_path)
+-            menu_name = _file_path.parent.name
+-            filename = _file_path.name
+-
+-            if not validation_result:
+-                logger.error(f"Error while processing file {file_path}")
++        response: dict[str, list] = {"menu": []}
++        menu_map: dict[str, dict] = {}
+
+-            menu_result = self.find_menu(response, menu_name) or {
+-                "name": menu_name,
+-                "path": str(_file_path.parent),
+-                "components": [],
+-            }
+-            component_name = filename.split(".")[0]
++        async def process_single_file(file_path: Path):
++            validation_result, result_content = await self.process_file_async(file_path)
++            menu_name = file_path.parent.name
++            filename = file_path.name
+
+-            if "_" in component_name:
+-                component_name_camelcase = " ".join(word.title() for word in component_name.split("_"))
+-            else:
+-                component_name_camelcase = component_name
++            component_name = filename.partition(".")[0]
++            component_name_camelcase = (
++                " ".join(word.title() for word in component_name.split("_"))
++                if "_" in component_name
++                else component_name
++            )
+
++            output_types = [component_name_camelcase]
+             if validation_result:
+                 try:
+                     output_types = await self.get_output_types_from_code_async(result_content)
+                 except Exception:
+-                    logger.exception("Error while getting output types from code")
+-                    output_types = [component_name_camelcase]
+-            else:
+-                output_types = [component_name_camelcase]
+-
+-            component_info = {
+-                "name": component_name_camelcase,
+-                "output_types": output_types,
+-                "file": filename,
+-                "code": result_content if validation_result else "",
+-                "error": "" if validation_result else result_content,
++                    logger.exception(f"Error getting output types for {file_path}")
++
++            return {
++                'menu_name': menu_name,
++                'file_path': file_path,
++                'component_info': {
++                    "name": component_name_camelcase,
++                    "output_types": output_types,
++                    "file": filename,
++                    "code": result_content if validation_result else "",
++                    "error": "" if validation_result else result_content,
++                }
+             }
+-            menu_result["components"].append(component_info)
+
+-            if menu_result not in response["menu"]:
+-                response["menu"].append(menu_result)
++        chunk_size = 10
++        for i in range(0, len(file_paths), chunk_size):
++            chunk = file_paths[i:i + chunk_size]
++            chunk_results = await asyncio.gather(
++                *(process_single_file(Path(fp)) for fp in chunk)
++            )
++
++            for result in chunk_results:
++                menu_name = result['menu_name']
++                file_path = result['file_path']
++                component_info = result['component_info']
++
++                if menu_name not in menu_map:
++                    menu_result = {
++                        "name": menu_name,
++                        "path": str(file_path.parent),
++                        "components": []
++                    }
++                    menu_map[menu_name] = menu_result
++                    response["menu"].append(menu_result)
++
++                menu_map[menu_name]["components"].append(component_info)
+
+         logger.debug("-------------------- Component menu list built --------------------")
+         return response
+diff --git a/src/backend/base/langflow/initial_setup/setup.py b/src/backend/base/langflow/initial_setup/setup.py
+index 3d89e9999..56c3fe059 100644
+--- a/src/backend/base/langflow/initial_setup/setup.py
++++ b/src/backend/base/langflow/initial_setup/setup.py
+@@ -626,7 +626,7 @@ async def create_or_update_starter_projects(get_all_components_coro: Awaitable[d
+                 )
+
+
+-def initialize_super_user_if_needed():
++async def initialize_super_user_if_needed():
+     settings_service = get_settings_service()
+     if not settings_service.auth_settings.AUTO_LOGIN:
+         return
+diff --git a/src/backend/base/langflow/interface/utils.py b/src/backend/base/langflow/interface/utils.py
+index 1367c334c..103599163 100644
+--- a/src/backend/base/langflow/interface/utils.py
++++ b/src/backend/base/langflow/interface/utils.py
+@@ -89,7 +89,7 @@ def extract_input_variables_from_prompt(prompt: str) -> list[str]:
+     return variables
+
+
+-def setup_llm_caching():
++async def setup_llm_caching():
+     """Setup LLM caching."""
+     settings_service = get_settings_service()
+     try:
+diff --git a/src/backend/base/langflow/main.py b/src/backend/base/langflow/main.py
+index bf8bd4dde..8bb5c071b 100644
+--- a/src/backend/base/langflow/main.py
++++ b/src/backend/base/langflow/main.py
+@@ -1,3 +1,4 @@
++import time
+ import asyncio
+ import json
+ import os
+@@ -87,31 +88,76 @@ class JavaScriptMIMETypeMiddleware(BaseHTTPMiddleware):
+         return response
+
+
++async def initialize_core_services(fix_migration, socketio_server):
++    """Initialize core services in parallel"""
++    tasks = [
++        initialize_services(fix_migration=fix_migration, socketio_server=socketio_server),
++        setup_llm_caching(),
++        initialize_super_user_if_needed()
++    ]
++    await asyncio.gather(*tasks)
++
++
++async def initialize_cache_and_projects():
++    """Initialize cache and projects in parallel"""
++    settings_service = get_settings_service()
++    cache_service = get_cache_service()
++
++    cache_task = asyncio.create_task(
++        get_and_cache_all_types_dict(settings_service, cache_service)
++    )
++
++    projects_task = asyncio.create_task(
++        create_or_update_starter_projects(cache_task)
++    )
++
++    return await asyncio.gather(cache_task, projects_task)
++
++
+ def get_lifespan(fix_migration=False, socketio_server=None, version=None):
+     @asynccontextmanager
+     async def lifespan(app: FastAPI):
+         nest_asyncio.apply()
+-        # Startup message
+         if version:
+             rprint(f"[bold green]Starting Langflow v{version}...[/bold green]")
+         else:
+             rprint("[bold green]Starting Langflow...[/bold green]")
++
+         try:
+-            initialize_services(fix_migration=fix_migration, socketio_server=socketio_server)
+-            setup_llm_caching()
+-            initialize_super_user_if_needed()
+-            task = asyncio.create_task(get_and_cache_all_types_dict(get_settings_service(), get_cache_service()))
+-            await create_or_update_starter_projects(task)
+-            asyncio.create_task(get_telemetry_service().start())
+-            load_flows_from_directory()
++            # Inicialização paralela dos serviços core
++            await initialize_core_services(fix_migration, socketio_server)
++
++            # Cache e projetos em parallel
++            #await initialize_cache_and_projects()
++
++            # Iniciar telemetria em background sem aguardar
++            telemetry_task = asyncio.create_task(
++                get_telemetry_service().start()
++            )
++
++            # Carregar flows em background
++            flow_task = asyncio.create_task(
++                asyncio.to_thread(load_flows_from_directory)
++            )
++
++            # Aguardar tarefas background apenas se necessário
++            await asyncio.gather(flow_task)
++
++            rprint("[bold yellow]Application startup complete.[/bold yellow]")
+             yield
++
++            # Cleanup
++            for task in [telemetry_task]:
++                if not task.done():
++                    task.cancel()
++
+         except Exception as exc:
+             if "langflow migration --fix" not in str(exc):
+                 logger.exception(exc)
+             raise
+-        # Shutdown message
+-        rprint("[bold red]Shutting down Langflow...[/bold red]")
+-        await teardown_services()
++        finally:
++            rprint("[bold red]Shutting down Langflow...[/bold red]")
++            await teardown_services()
+
+     return lifespan
+
+@@ -120,100 +166,39 @@ def create_app():
+     """Create the FastAPI app and include the router."""
+     from langflow.utils.version import get_version_info
+
++    # Pré-carregar configurações e versão
+     __version__ = get_version_info()["version"]
++    settings = get_settings_service().settings
+
++    # Configurar logging uma única vez
+     configure()
+-    lifespan = get_lifespan(version=__version__)
+-    app = FastAPI(lifespan=lifespan, title="Langflow", version=__version__)
+-    setup_sentry(app)
+-    origins = ["*"]
+
++    # Criar app com lifespan otimizado
++    app = FastAPI(
++        lifespan=get_lifespan(version=__version__),
++        title="Langflow",
++        version=__version__
++    )
++
++    # Adicionar middlewares essenciais primeiro
+     app.add_middleware(
+         CORSMiddleware,
+-        allow_origins=origins,
++        allow_origins=["*"],
+         allow_credentials=True,
+         allow_methods=["*"],
+         allow_headers=["*"],
+     )
+-    app.add_middleware(JavaScriptMIMETypeMiddleware)
+-
+-    @app.middleware("http")
+-    async def check_boundary(request: Request, call_next):
+-        if "/api/v1/files/upload" in request.url.path:
+-            content_type = request.headers.get("Content-Type")
+-
+-            if not content_type or "multipart/form-data" not in content_type or "boundary=" not in content_type:
+-                return JSONResponse(
+-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+-                    content={"detail": "Content-Type header must be 'multipart/form-data' with a boundary parameter."},
+-                )
+-
+-            boundary = content_type.split("boundary=")[-1].strip()
+-
+-            if not re.match(r"^[\w\-]{1,70}$", boundary):
+-                return JSONResponse(
+-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+-                    content={"detail": "Invalid boundary format"},
+-                )
+-
+-            body = await request.body()
+-
+-            boundary_start = f"--{boundary}".encode()
+-            boundary_end = f"--{boundary}--\r\n".encode()
+-
+-            if not body.startswith(boundary_start) or not body.endswith(boundary_end):
+-                return JSONResponse(
+-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+-                    content={"detail": "Invalid multipart formatting"},
+-                )
+-
+-        return await call_next(request)
+-
+-    @app.middleware("http")
+-    async def flatten_query_string_lists(request: Request, call_next):
+-        flattened: list[tuple[str, str]] = []
+-        for key, value in request.query_params.multi_items():
+-            flattened.extend((key, entry) for entry in value.split(","))
+-
+-        request.scope["query_string"] = urlencode(flattened, doseq=True).encode("utf-8")
+-
+-        return await call_next(request)
+-
+-    settings = get_settings_service().settings
+-    if prome_port_str := os.environ.get("LANGFLOW_PROMETHEUS_PORT"):
+-        # set here for create_app() entry point
+-        prome_port = int(prome_port_str)
+-        if prome_port > 0 or prome_port < MAX_PORT:
+-            rprint(f"[bold green]Starting Prometheus server on port {prome_port}...[/bold green]")
+-            settings.prometheus_enabled = True
+-            settings.prometheus_port = prome_port
+-        else:
+-            msg = f"Invalid port number {prome_port_str}"
+-            raise ValueError(msg)
+-
+-    if settings.prometheus_enabled:
+-        from prometheus_client import start_http_server
+-
+-        start_http_server(settings.prometheus_port)
+
++    # Configurar routers
+     app.include_router(router)
+     app.include_router(health_check_router)
+     app.include_router(log_router)
+
+-    @app.exception_handler(Exception)
+-    async def exception_handler(request: Request, exc: Exception):
+-        if isinstance(exc, HTTPException):
+-            logger.error(f"HTTPException: {exc.detail}")
+-            return JSONResponse(
+-                status_code=exc.status_code,
+-                content={"message": str(exc.detail)},
+-            )
+-        logger.error(f"unhandled error: {exc}")
+-        return JSONResponse(
+-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+-            content={"message": str(exc)},
+-        )
++    # Configurar Sentry e outros middlewares não essenciais depois
++    setup_sentry(app)
++    app.add_middleware(JavaScriptMIMETypeMiddleware)
+
++    # Configurar instrumentação
+     FastAPIInstrumentor.instrument_app(app)
+
+     return app
+diff --git a/src/backend/base/langflow/services/utils.py b/src/backend/base/langflow/services/utils.py
+index c13bff535..81a0e1127 100644
+--- a/src/backend/base/langflow/services/utils.py
++++ b/src/backend/base/langflow/services/utils.py
+@@ -156,7 +156,7 @@ def initialize_session_service():
+     )
+
+
+-def initialize_services(fix_migration: bool = False, socketio_server=None):
++async def initialize_services(fix_migration: bool = False, socketio_server=None):
+     """
+     Initialize all the services needed.
+     """
