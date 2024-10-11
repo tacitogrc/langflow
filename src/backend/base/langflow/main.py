@@ -2,9 +2,12 @@ import asyncio
 import json
 import os
 import re
+import signal
+import sys
 import warnings
 from contextlib import asynccontextmanager
 from http import HTTPStatus
+from multiprocessing import Process, Queue
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -87,11 +90,83 @@ class JavaScriptMIMETypeMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# -------------------------------------------------------
+class BackgroundProcessManager:
+    def __init__(self):
+        self.process: Process | None = None
+        self.queue: Queue | None = None
+
+    def start_process(self):
+        """Inicia o processo em background"""
+        self.queue = Queue()
+        self.process = Process(target=run_heavy_task_process, args=(self.queue,))
+        self.process.daemon = True
+        self.process.start()
+
+    def cleanup(self):
+        """Limpa recursos e encerra o processo adequadamente"""
+        if self.process and self.process.is_alive():
+            self.process.terminate()
+            self.process.join(timeout=3)
+
+            if self.process.is_alive():
+                self.process.kill()
+                self.process.join()
+
+        if self.queue:
+            self.queue.close()
+            self.queue.join_thread()
+
+
+process_manager = BackgroundProcessManager()
+
+
+def run_heavy_task_process(queue):
+    try:
+
+        def handle_sigterm(signum, frame):
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, handle_sigterm)
+
+        settings_service = get_settings_service()
+        cache_service = get_cache_service()
+
+        result = get_and_cache_all_types_dict(settings_service, cache_service)
+        queue.put(result)
+    except Exception as e:
+        queue.put(e)
+    finally:
+        queue.close()
+
+
+async def initialize_background_tasks():
+    """Initialize background tasks without blocking the main startup"""
+    process_manager.start_process()
+
+    async def monitor_task():
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, process_manager.queue.get)
+
+            if isinstance(result, Exception):
+                logger.error(f"Error in background task: {result}")
+                return
+
+            await create_or_update_starter_projects(result)
+
+        except Exception as e:
+            logger.error(f"Error in monitor task: {e}")
+        finally:
+            process_manager.cleanup()
+
+    asyncio.create_task(monitor_task())
+
+
 def get_lifespan(fix_migration=False, socketio_server=None, version=None):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nest_asyncio.apply()
-        # Startup message
         if version:
             rprint(f"[bold green]Starting Langflow v{version}...[/bold green]")
         else:
@@ -100,20 +175,34 @@ def get_lifespan(fix_migration=False, socketio_server=None, version=None):
             initialize_services(fix_migration=fix_migration, socketio_server=socketio_server)
             setup_llm_caching()
             initialize_super_user_if_needed()
-            task = asyncio.create_task(get_and_cache_all_types_dict(get_settings_service(), get_cache_service()))
-            await create_or_update_starter_projects(task)
+
+            await initialize_background_tasks()
+
             asyncio.create_task(get_telemetry_service().start())
             load_flows_from_directory()
+
+            def signal_handler():
+                process_manager.cleanup()
+
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop = asyncio.get_running_loop()
+                loop.add_signal_handler(sig, signal_handler)
+
             yield
+
         except Exception as exc:
             if "langflow migration --fix" not in str(exc):
                 logger.exception(exc)
             raise
-        # Shutdown message
-        rprint("[bold red]Shutting down Langflow...[/bold red]")
-        await teardown_services()
+        finally:
+            process_manager.cleanup()
+            rprint("[bold red]Shutting down Langflow...[/bold red]")
+            await teardown_services()
 
     return lifespan
+
+
+# -------------------------------------------------------
 
 
 def create_app():
