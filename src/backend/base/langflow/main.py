@@ -1,3 +1,4 @@
+import time
 import asyncio
 import json
 import os
@@ -68,6 +69,16 @@ class RequestCancelledMiddleware(BaseHTTPMiddleware):
 class JavaScriptMIMETypeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         try:
+            C1 = "\033[93m"
+            C2 = "\033[94m"
+            C3 = "\033[95m"
+            CN = "\033[0m"
+
+            method = request.method
+            url = str(request.url)
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{C1}{timestamp}: {C2}{method} {C3}{url} {CN}")
+
             response = await call_next(request)
         except Exception as exc:
             if isinstance(exc, PydanticSerializationError):

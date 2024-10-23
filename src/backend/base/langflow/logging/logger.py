@@ -166,8 +166,9 @@ def configure(
     else:
         # Human-readable
         log_format = (
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> - <level>"
+            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> - <level>"
             "{level: <8}</level> - {module} - <level>{message}</level>"
+            "\n{file.path} +{line}\n"
         )
 
         # Configure loguru to use RichHandler
