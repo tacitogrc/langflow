@@ -312,6 +312,7 @@ class MessageResponse(DefaultModel):
     session_id: str
     text: str
     files: list[str] = []
+    edit: bool
 
     meta_data: MetaData | None = None
     category: str | None = None
